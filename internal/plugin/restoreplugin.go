@@ -17,29 +17,34 @@ limitations under the License.
 package plugin
 
 import (
-	//"github.com/openshift/client-go/route/clientset/versioned/scheme"
 	"context"
-	"sync"
+	"fmt"
+	"log"
+	"os/user"
+	"path/filepath"
+	"strings"
 	"time"
 
 	uuid "github.com/nu7hatch/gouuid"
 	"github.com/sirupsen/logrus"
+	client "github.com/vmware-tanzu/velero/pkg/client"
+
+	//pkgrestore "github.com/vmware-tanzu/velero/pkg/restore"
+
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
+
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-
-	monitoringv1alpha1 "github.com/openshift/route-monitor-operator/api/v1alpha1"
-	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
-
-	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/tools/clientcmd"
 )
 
 // RestorePlugin is a restore item action plugin for Velero
 type RestorePlugin struct {
 	log                    logrus.FieldLogger
-	waitGroup              sync.WaitGroup
 }
 
 // NewRestorePlugin instantiates a RestorePlugin.
@@ -56,6 +61,7 @@ func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 	return velero.ResourceSelector{}, nil
 }
 
+
 // Execute allows the RestorePlugin to perform arbitrary logic with the item being restored,
 // in this case, setting a custom annotation on the item being restored.
 func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
@@ -63,9 +69,8 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	p.log.Info("0.6!")
 
 	//executeOutput, err := action.Execute(&velero.RestoreItemActionExecuteInput{
-	//	Item:           obj,					// modified object (status cleared)
-	//	ItemFromBackup: itemFromBackup,			// original from backup
-	//	Restore:        ctx.restore,			/ ????
+	//	Item:           obj,					// modified object (status clepanic: assignment to entry in nil map
+
 	//})
 
 	metadata, err := meta.Accessor(input.Item)
@@ -81,70 +86,123 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	annotations["velero.io/my-restore-plugin"] = "1"
 	metadata.SetAnnotations(annotations)
 
-	// status restore
-	content := input.Item.UnstructuredContent()
-	content["status"] = input.ItemFromBackup.UnstructuredContent()["status"]
-	input.Item.SetUnstructuredContent(content)
 
+
+	content := input.ItemFromBackup.UnstructuredContent()
 	if content["status"] != ""{
-		p.waitGroup.Add(1)
-		go p.addStatus(content)
+		var obj unstructured.Unstructured
+		obj.SetUnstructuredContent(input.ItemFromBackup.UnstructuredContent())
+		go NewStatusRestorer(p.log).addStatus(obj)
 	}
-
-	p.log.Info("--------------------------------------------")
-	p.log.Info(input.Item.UnstructuredContent())
-	p.log.Info("--------------------------------------------")
 
 	return velero.NewRestoreItemActionExecuteOutput(input.Item), nil
 }
-func (p *RestorePlugin)addStatus(content map[string]interface{}) {
+
+
+
+/*
+ *	Restores Status from input CR
+ *
+ */
+type StatusRestorer struct {
+	log                    logrus.FieldLogger
+	dynamicClient		   dynamic.Interface
+	resourceClients        map[resourceClientKey]client.Dynamic
+}
+type resourceClientKey struct {
+	resource  schema.GroupVersionResource
+	namespace string
+}
+
+func NewStatusRestorer(log logrus.FieldLogger) *StatusRestorer{
+    config := userConfig()
+	c, err := dynamic.NewForConfig(config)
+	errExit("Failed to create client", err)
+	return &StatusRestorer{	log: log, 
+							dynamicClient  : c,
+						  }
+}
+
+
+func (p *StatusRestorer)addStatus(content unstructured.Unstructured) {
 	u, err := uuid.NewV4()
 	p.log = p.log.WithFields(logrus.Fields{
 		"thread":          u.String(),
 	})
 
-	namespace := content["metadata"].(map[string]interface{})["namespace"].(string)
-	name := content["metadata"].(map[string]interface{})["name"].(string)
-
+	namespace := content.GetNamespace()
+	name := content.GetName()
 	p.log.Info("Starting GoRoutine for %s ", name)
-	config, err := rest.InClusterConfig()
-	crdConfig := *config
-	crdConfig.ContentConfig.GroupVersion = &schema.GroupVersion{Group: "monitoring.openshift.io", Version: "v1alpha1"}
-	crdConfig.APIPath = "/apis"
+	p.log.Info("--------------------------------------------")
+	fmt.Println(content)
+	p.log.Info("--------------------------------------------")
+	
+	gv, _ := schema.ParseGroupVersion(content.GetAPIVersion())
+	resource := strings.ToLower(fmt.Sprint(content.GetKind(),"s"))
+	gvr := gv.WithResource(resource)
 
-	scheme := runtime.NewScheme()
+	p.log.Infof("Processing namespace %q, resource %q", namespace, &gvr)
 
-	utilruntime.Must(monitoringv1alpha1.AddToScheme(scheme))
-
-	crdConfig.NegotiatedSerializer = serializer.NewCodecFactory(scheme)
-	crdConfig.UserAgent = rest.DefaultKubernetesUserAgent()
-
-	if err != nil {
-		panic(err)
-	}
-
-
-	cr := monitoringv1alpha1.RouteMonitor{}
-
-	client, _ := rest.UnversionedRESTClientFor(&crdConfig)
-
+	c := p.dynamicClient.Resource(gvr).Namespace(namespace)
+	errExit(fmt.Sprintf("error getting resource client for namespace %q, resource %q", namespace, &gvr), err)
+	
 	for i := 0; i < 1000; i++{
+
+		rv, err := c.Get(context.TODO(), name, metav1.GetOptions{})
+		errLog("Failed to get Resource", err)
+
+		if rv == nil {
+			p.log.Info("Waiting for CR to be created: ", name)
+			time.Sleep(1*time.Second)
+			continue
+		}
+
+		_content := rv.UnstructuredContent()
+		_content["status"] = content.UnstructuredContent()["status"]
+		rv.SetUnstructuredContent(_content)
 		
-		client.Get().
-			Namespace(namespace).
-			Name(name).
-			Resource("routemonitors").
-			Do(context.Background()).
-			Into(&cr)
-        
-		p.log.Info("CR: %v", cr)
-		p.log.Info("CR: %v", cr.Name)
-
-		//client.``
-
-		time.Sleep(10*time.Second)
-
+		rv, err = c.UpdateStatus(context.TODO(), rv, metav1.UpdateOptions{})
+		errLog("Failed to update Status: ", err)
 	}
 	p.log.Info("Finished GoRoutine")
+}
 
+
+func userConfig() *rest.Config {
+
+	// In Cluster Condition
+	log.Printf("Fetching In-Cluster Kube API config")
+	cfg, err := rest.InClusterConfig()
+	errLog("Failed to in-Cluster conifg", err)
+
+	// User kubefile config
+	log.Printf("Fetching user kubefile config")
+	usr, err := user.Current()
+	errLog("Failed to get current user", err)
+	path := filepath.Join(usr.HomeDir, ".kube", "config")
+	cfg, err = clientcmd.BuildConfigFromFlags("", path)
+	errExit("Failed to get user config", err)
+
+	log.Print("Loading default set")
+	c, err := clientcmd.NewDefaultClientConfigLoadingRules().Load()
+	errExit("Failed to load", err)
+	clientConfig := clientcmd.NewDefaultClientConfig(*c, nil)
+	cfg, err = clientConfig.ClientConfig()
+	
+	log.Print("KubeAPI is at ", cfg.Host)
+	return cfg
+}
+
+
+
+func errExit(msg string, err error) {
+	if err != nil {
+		log.Fatalf("%s: %#v", msg, err)
+	}
+}
+
+func errLog(msg string, err error){
+	if err != nil {
+		log.Printf("%s: %#v", msg, err)
+	}
 }
