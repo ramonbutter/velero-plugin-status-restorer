@@ -1,0 +1,43 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cluster-migration
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: managed-velero-plugin-status-patch-sa
+  namespace: cluster-migration
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: managed-velero-plugin-status-patch-role
+rules:
+  - apiGroups:
+      - aws.managed.openshift.io
+    resources:
+      - "*"
+      - accountclaims
+      - accounts
+      - accountpools
+      - awsfederatedaccountaccesses
+      - awsfederatedroles
+    verbs:
+      - "*"
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: managed-velero-plugin-status-patch-rolebinding
+subjects:
+  - kind: ServiceAccount
+    name: managed-velero-plugin-status-patch-sa
+    # Replace this with the namespace the operator is deployed in.
+    namespace: cluster-migration
+roleRef:
+  kind: ClusterRole
+  name: managed-velero-plugin-status-patch-role
+  apiGroup: rbac.authorization.k8s.io
