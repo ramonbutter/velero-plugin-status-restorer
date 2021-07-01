@@ -15,9 +15,9 @@
 PKG := github.com/vmware-tanzu/velero-plugin-example
 BIN := velero-plugin-example
 
-REGISTRY ?= velero
-IMAGE    ?= $(REGISTRY)/velero-plugin-example
-VERSION  ?= main 
+REGISTRY ?= quay.io/rbutter
+IMAGE    ?= $(REGISTRY)/velero-restore-plugin
+VERSION  ?= latest 
 
 GOOS   ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -72,3 +72,19 @@ build-dirs:
 clean:
 	@echo "cleaning"
 	rm -rf _output
+
+.PHONY: build-push-patch
+build-push-patch:
+	docker build -f patch.dockerfile . -t quay.io/mdewald/managed-velero-plugin-status-patch
+	docker push quay.io/mdewald/managed-velero-plugin-status-patch
+
+.PHONY: all
+all: build-push-patch container push
+
+
+install:
+	velero plugin add $(IMAGE):$(VERSION) -n openshift-velero
+
+remove: uninstall
+uninstall:
+	velero plugin remove $(IMAGE):$(VERSION) -n openshift-velero

@@ -1,0 +1,91 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: cluster-migration-01
+  namespace: cluster-migration
+spec:
+  template:
+    spec:
+      serviceAccountName: managed-velero-plugin-status-patch-sa
+      containers:
+        - name: patch-status
+          image: quay.io/mdewald/managed-velero-plugin-status-patch
+          args:
+            - |
+              {
+                "apiVersion": "aws.managed.openshift.io/v1alpha1",
+                "kind": "Account",
+                "metadata": {
+                    "labels": {
+                        "iamUserId": "fake-uid"
+                    },
+                    "name": "osd-creds-mgmt-fake",
+                    "namespace": "aws-account-operator"
+                },
+                "spec": {
+                    "awsAccountID": "000000000000",
+                    "claimLink": "",
+                    "iamUserSecret": "osd-creds-mgmt-fake-secret",
+                    "legalEntity": {
+                        "id": "fake-legal-entity",
+                        "name": "Fa Ke"
+                    }
+                },
+                "status": {
+                    "conditions": [
+                        {
+                            "lastProbeTime": "2021-06-14T14:38:15Z",
+                            "lastTransitionTime": "2021-01-13T16:18:51Z",
+                            "message": "Creating",
+                            "reason": "Creating",
+                            "status": "True",
+                            "type": "Creating"
+                        },
+                        {
+                            "lastProbeTime": "2021-06-14T14:38:15Z",
+                            "lastTransitionTime": "2021-06-14T14:38:15Z",
+                            "message": "Recovering from stale region initialization.",
+                            "reason": "InitializingRegions",
+                            "status": "False",
+                            "type": "InitializingRegions"
+                        },
+                        {
+                            "lastProbeTime": "2021-01-13T16:24:39Z",
+                            "lastTransitionTime": "2021-01-13T16:21:07Z",
+                            "message": "Account pending AWS limits verification",
+                            "reason": "PendingVerification",
+                            "status": "True",
+                            "type": "PendingVerification"
+                        },
+                        {
+                            "lastProbeTime": "2021-01-13T17:16:17Z",
+                            "lastTransitionTime": "2021-01-13T17:16:17Z",
+                            "message": "Account ready to be claimed",
+                            "reason": "Ready",
+                            "status": "True",
+                            "type": "Ready"
+                        },
+                        {
+                            "lastProbeTime": "2021-06-01T15:22:34Z",
+                            "lastTransitionTime": "2021-01-25T22:25:54Z",
+                            "message": "Account Reuse - Ready",
+                            "reason": "Ready",
+                            "status": "True",
+                            "type": "Reused"
+                        },
+                        {
+                            "lastProbeTime": "2021-06-14T14:38:15Z",
+                            "lastTransitionTime": "2021-06-14T14:38:15Z",
+                            "message": "Creation pending for longer than 25 minutes",
+                            "reason": "CreationTimeout",
+                            "status": "True",
+                            "type": "AccountCreationFailed"
+                        }
+                    ],
+                    "reused": true,
+                    "state": "Failed",
+                    "supportCaseID": "case-000000000000-aaaa-0000-0000000000000000"
+                }
+              }
+      restartPolicy: Never
+  backoffLimit: 4

@@ -17,32 +17,17 @@ limitations under the License.
 package main
 
 import (
-	"github.com/rbutter/velero-plugin-example/internal/plugin"
+	"github.com/ramonbutter/velero-plugin-status-saver/internal/plugin"
 	"github.com/sirupsen/logrus"
 	"github.com/vmware-tanzu/velero/pkg/plugin/framework"
 )
 
 func main() {
 	framework.NewServer().
-		RegisterObjectStore("example.io/object-store-plugin", newObjectStorePlugin).
-		RegisterVolumeSnapshotter("example.io/volume-snapshotter-plugin", newNoOpVolumeSnapshotterPlugin).
 		RegisterRestoreItemAction("example.io/restore-plugin", newRestorePlugin).
-		RegisterBackupItemAction("example.io/backup-plugin", newBackupPlugin).
 		Serve()
-}
-
-func newBackupPlugin(logger logrus.FieldLogger) (interface{}, error) {
-	return plugin.NewBackupPlugin(logger), nil
-}
-
-func newObjectStorePlugin(logger logrus.FieldLogger) (interface{}, error) {
-	return plugin.NewFileObjectStore(logger), nil
 }
 
 func newRestorePlugin(logger logrus.FieldLogger) (interface{}, error) {
 	return plugin.NewRestorePlugin(logger), nil
-}
-
-func newNoOpVolumeSnapshotterPlugin(logger logrus.FieldLogger) (interface{}, error) {
-	return plugin.NewNoOpVolumeSnapshotter(logger), nil
 }
