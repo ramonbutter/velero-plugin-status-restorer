@@ -25,13 +25,15 @@ const (
 
 func RestoreStateRequired(kind string) bool {
 	switch kind {
-	case "Account",
+	case
+		"Account",
 		"AccountClaim",
-		"ProjectClaim",
-		"ProjectReference",
-		"ClusterDeployment",
 		"AwsFederatedAccountAccess",
-		"AwsFederatedRole":
+		"CertificateRequest",
+		"ClusterDeployment",
+		"ClusterSync",
+		"ProjectClaim",
+		"ProjectReference":
 		return true
 	}
 	return false
@@ -68,6 +70,13 @@ func CreateJob(cr string) error {
 			Namespace: MigrationNamespace,
 		},
 		Rules: []rbacv1.PolicyRule{
+			{
+				APIGroups: []string{"certman.managed.openshift.io"},
+				Resources: []string{
+					"*",
+				},
+				Verbs: []string{"*"},
+			},
 			{
 				APIGroups: []string{"gcp.managed.openshift.io"},
 				Resources: []string{
