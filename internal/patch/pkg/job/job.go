@@ -33,6 +33,7 @@ func RestoreStateRequired(kind string) bool {
 		"ClusterDeployment",
 		"ClusterSync",
 		"ProjectClaim",
+		"DNSZone",
 		"ProjectReference":
 		return true
 	}
