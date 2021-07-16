@@ -18,6 +18,7 @@ BIN := velero-plugin-example
 REGISTRY ?= quay.io/rbutter
 IMAGE    ?= $(REGISTRY)/velero-restore-plugin
 VERSION  ?= latest 
+CONTAINER_ENGINE ?= podman
 
 GOOS   ?= $(shell go env GOOS)
 GOARCH ?= $(shell go env GOARCH)
@@ -39,15 +40,15 @@ ci: verify-modules local test
 # container builds a Docker image containing the binary.
 .PHONY: container
 container:
-	docker build -t $(IMAGE):$(VERSION) .
+	$(CONTAINER_ENGINE) build -t $(IMAGE):$(VERSION) .
 
 # push pushes the Docker image to its registry.
 .PHONY: push
 push:
-	@docker push $(IMAGE):$(VERSION)
+	@$(CONTAINER_ENGINE) push $(IMAGE):$(VERSION)
 ifeq ($(TAG_LATEST), true)
-	docker tag $(IMAGE):$(VERSION) $(IMAGE):latest
-	docker push $(IMAGE):latest
+	$(CONTAINER_ENGINE) tag $(IMAGE):$(VERSION) $(IMAGE):latest
+	$(CONTAINER_ENGINE) push $(IMAGE):latest
 endif
 
 # modules updates Go module files
@@ -75,8 +76,8 @@ clean:
 
 .PHONY: build-push-patch
 build-push-patch:
-	docker build -f patch.dockerfile . -t quay.io/mdewald/managed-velero-plugin-status-patch
-	docker push quay.io/mdewald/managed-velero-plugin-status-patch
+	$(CONTAINER_ENGINE) build -f patch.dockerfile . -t $(REGISTRY)/managed-velero-plugin-status-patch
+	$(CONTAINER_ENGINE) push $(REGISTRY)/managed-velero-plugin-status-patch
 
 .PHONY: all
 all: build-push-patch container push
