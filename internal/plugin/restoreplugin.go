@@ -52,23 +52,21 @@ func (p *RestorePlugin) AppliesTo() (velero.ResourceSelector, error) {
 func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*velero.RestoreItemActionExecuteOutput, error) {
 	p.log.Info("Hello from my RestorePlugin!")
 
-	//executeOutput, err := action.Execute(&velero.RestoreItemActionExecuteInput{
-	//	Item:           obj,					// modified object (status clepanic: assignment to entry in nil map
-
-	//})
-
 	metadata, err := meta.Accessor(input.Item)
 	if err != nil {
 		return &velero.RestoreItemActionExecuteOutput{}, err
 	}
 
-	annotations := metadata.GetAnnotations()
-	if annotations == nil {
-		annotations = make(map[string]string)
-	}
+	//annotations := metadata.GetAnnotations()
+	//if annotations == nil {
+	//	annotations = make(map[string]string)
+	//}
+	//annotations["velero.io/my-restore-plugin"] = "1"
+	//metadata.SetAnnotations(annotations)
 
-	annotations["velero.io/my-restore-plugin"] = "1"
-	metadata.SetAnnotations(annotations)
+	// restore finalizers
+	metadataBackupItem, _ := meta.Accessor(input.ItemFromBackup)
+	metadata.SetFinalizers(metadataBackupItem.GetFinalizers())
 
 	if job.RestoreStateRequired(input.ItemFromBackup.UnstructuredContent()["kind"].(string)) {
 		content, _ := json.Marshal(input.ItemFromBackup.UnstructuredContent())
