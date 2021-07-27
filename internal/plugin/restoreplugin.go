@@ -21,11 +21,11 @@ import (
 
 	"github.com/ramonbutter/velero-plugin-status-saver/internal/patch/pkg/job"
 	"github.com/sirupsen/logrus"
+	"k8s.io/apimachinery/pkg/api/meta"
 
 	//pkgrestore "github.com/vmware-tanzu/velero/pkg/restore"
 
 	"github.com/vmware-tanzu/velero/pkg/plugin/velero"
-	"k8s.io/apimachinery/pkg/api/meta"
 )
 
 // RestorePlugin is a restore item action plugin for Velero
@@ -65,12 +65,15 @@ func (p *RestorePlugin) Execute(input *velero.RestoreItemActionExecuteInput) (*v
 	//metadata.SetAnnotations(annotations)
 
 	// restore finalizers
-	metadataBackupItem, _ := meta.Accessor(input.ItemFromBackup)
+	metadataBackupItem, err := meta.Accessor(input.ItemFromBackup)
+	if err != nil {
+		return &velero.RestoreItemActionExecuteOutput{}, err
+	}
 	metadata.SetFinalizers(metadataBackupItem.GetFinalizers())
 
 	if job.RestoreStateRequired(input.ItemFromBackup.UnstructuredContent()["kind"].(string)) {
 		content, _ := json.Marshal(input.ItemFromBackup.UnstructuredContent())
-		err = job.CreateJob(string(content))
+		err := job.CreateJob(string(content))
 		if err != nil {
 			p.log.Error(err)
 			return &velero.RestoreItemActionExecuteOutput{}, err

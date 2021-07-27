@@ -5,9 +5,11 @@ import (
 	"testing"
 	"time"
 
+	"reflect"
+
 	configv1 "github.com/openshift/api/config/v1"
 	routev1 "github.com/openshift/api/route/v1"
-	"github.com/openshift/route-monitor-operator/api/v1alpha1"
+	hivev1 "github.com/openshift/hive/apis/hive/v1"
 	monitoringv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	plugin "github.com/ramonbutter/velero-plugin-status-saver/internal/plugin"
 	logrus "github.com/sirupsen/logrus"
@@ -21,21 +23,18 @@ import (
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	monitoringopenshiftiov1alpha1 "github.com/openshift/route-monitor-operator/api/v1alpha1"
-	monitoringv1alpha1 "github.com/openshift/route-monitor-operator/api/v1alpha1"
 )
 
 func NewClient(flags *genericclioptions.ConfigFlags) (client.Client, error) {
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
-	utilruntime.Must(monitoringv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(hivev1.AddToScheme(scheme))
 	utilruntime.Must(monitoringv1.AddToScheme(scheme))
 	utilruntime.Must(routev1.AddToScheme(scheme))
 	utilruntime.Must(configv1.AddToScheme(scheme))
 
-	utilruntime.Must(monitoringopenshiftiov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(hivev1.AddToScheme(scheme))
 
 	// +kubebuilder:scaffold:scheme
 
@@ -58,38 +57,37 @@ func NewClient(flags *genericclioptions.ConfigFlags) (client.Client, error) {
 }
 
 func TestAbc(t *testing.T) {
-	routeMonitor := v1alpha1.RouteMonitor{
+	testClusterDeployment := hivev1.ClusterDeployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:              "scott-pilgrim",
-			Namespace:         "openshift-route-monitor-operator",
+			Name:              "cluster-123",
+			Namespace:         "default",
 			DeletionTimestamp: nil,
-			Finalizers:        []string{},
+			Finalizers:        []string{"test-finalizer"},
 		},
-		Status: v1alpha1.RouteMonitorStatus{
-			RouteURL: "fake-route-url",
+		Spec: hivev1.ClusterDeploymentSpec{
+			ClusterName: "test-cluster",
+			BaseDomain:  "my-domain",
 		},
-		Spec: v1alpha1.RouteMonitorSpec{
-			Route: v1alpha1.RouteMonitorRouteSpec{
-				Name:      "test",
-				Namespace: "test-space",
-			},
-			Slo: v1alpha1.SloSpec{
-				TargetAvailabilityPercent: "99.5",
-			},
+		Status: hivev1.ClusterDeploymentStatus{
+			WebConsoleURL:   "console.my-domain.com",
+			InstallRestarts: 3,
 		},
 	}
+	namespacedName := types.NamespacedName{Name: testClusterDeployment.Name, Namespace: testClusterDeployment.Namespace}
 
 	log := logrus.New()
 	action := plugin.NewRestorePlugin(log)
-	itemFromBackupMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&routeMonitor)
-	routeMonitor.Status = v1alpha1.RouteMonitorStatus{}
-	objMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&routeMonitor)
+	itemFromBackupMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&testClusterDeployment)
+	cleanedTestClusterDeployment := testClusterDeployment
+	cleanedTestClusterDeployment.Status = hivev1.ClusterDeploymentStatus{}
+	cleanedTestClusterDeployment.SetFinalizers([]string{})
+	objMap, _ := runtime.DefaultUnstructuredConverter.ToUnstructured(&cleanedTestClusterDeployment)
 
 	// routemonitors.monitoring.openshift.io/v1alpha1
 	g := schema.GroupVersionKind{
-		Group:   "monitoring.openshift.io",
-		Version: "v1alpha1",
-		Kind:    "RouteMonitor",
+		Group:   "hive.openshift.io",
+		Version: "v1",
+		Kind:    "ClusterDeployment",
 	}
 	var obj unstructured.Unstructured
 	var itemFromBackup unstructured.Unstructured
@@ -101,9 +99,20 @@ func TestAbc(t *testing.T) {
 	testClient, err := NewClient(nil)
 	if err != nil {
 		log.Errorf("%v", err)
+		t.FailNow()
 	}
-	log.Info("Deleting previous RouteMonitor")
-	err = testClient.Delete(context.Background(), &routeMonitor)
+	log.Info("Deleting previous CR")
+	deployedClusterDeployment := hivev1.ClusterDeployment{}
+	err = testClient.Get(context.Background(), namespacedName, &deployedClusterDeployment)
+	if err != nil {
+		log.Errorf("%v", err)
+	}
+	deployedClusterDeployment.SetFinalizers([]string{})
+	err = testClient.Update(context.Background(), &deployedClusterDeployment)
+	if err != nil {
+		log.Errorf("%v", err)
+	}
+	err = testClient.Delete(context.Background(), &deployedClusterDeployment)
 	if err != nil {
 		log.Errorf("%v", err)
 	}
@@ -115,28 +124,34 @@ func TestAbc(t *testing.T) {
 		Restore:        nil,
 	})
 
-	log.Info("Creating RouteMonitor")
+	if !reflect.DeepEqual(obj.GetFinalizers(), itemFromBackup.GetFinalizers()) {
+		log.Error("Failed to restore Finalizer")
+		t.FailNow()
+	}
+
+	log.Info("Creating CR")
 	// simulating velero behavior
-	err = testClient.Create(context.Background(), &routeMonitor)
+	err = testClient.Create(context.Background(), &testClusterDeployment)
 	if err != nil {
 		log.Errorf("%v", err)
+		t.FailNow()
 	}
 
 	if executeOutput == nil {
-		t.Errorf("bla")
+		t.Errorf("no output given")
 	}
 
 	log.Info("Waiting for status update")
 	// wait for the status update by the plugin
-	deployedRouteMonitor := v1alpha1.RouteMonitor{}
-	namespacedName := types.NamespacedName{Name: routeMonitor.Name, Namespace: routeMonitor.Namespace}
+	deployedClusterDeployment = hivev1.ClusterDeployment{}
 	for i := 0; i < 10; i++ {
-		testClient.Get(context.Background(), namespacedName, &deployedRouteMonitor)
 		time.Sleep(time.Second)
-		if deployedRouteMonitor.Name != "" {
+		err := testClient.Get(context.Background(), namespacedName, &deployedClusterDeployment)
+		if err == nil {
 			//log.Info("RouteMonitor came up: ", deployedRouteMonitor)
-			if deployedRouteMonitor.Status != (v1alpha1.RouteMonitorStatus{}) {
-				t.Log("Status is Set", deployedRouteMonitor)
+			if reflect.DeepEqual(deployedClusterDeployment.Status, testClusterDeployment.Status) &&
+				reflect.DeepEqual(deployedClusterDeployment.ObjectMeta.Finalizers, testClusterDeployment.ObjectMeta.Finalizers) {
+				t.Log("CR was created correctly:", deployedClusterDeployment)
 				break
 			}
 		}
