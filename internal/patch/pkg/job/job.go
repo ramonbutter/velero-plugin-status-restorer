@@ -143,7 +143,7 @@ func CreateJob(cr string) error {
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "apply-status-" + strings.ToLower(genericObject.Kind) + "-" + strings.ToLower(id),
 			Namespace: MigrationNamespace,
-			Labels: map[string]string{
+			Annotations: map[string]string{
 				"restore-kind":      genericObject.Kind,
 				"restore-name":      genericObject.Metadata.Name,
 				"restore-namespace": genericObject.Metadata.Namespace,
