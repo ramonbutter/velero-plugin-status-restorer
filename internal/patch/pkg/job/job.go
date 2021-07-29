@@ -93,6 +93,13 @@ func CreateJob(cr string) error {
 				Verbs: []string{"*"},
 			},
 			{
+				APIGroups: []string{"hiveinternal.openshift.io"},
+				Resources: []string{
+					"*",
+				},
+				Verbs: []string{"*"},
+			},
+			{
 				APIGroups: []string{"monitoring.openshift.io"},
 				Resources: []string{
 					"*",
